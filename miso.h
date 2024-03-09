@@ -37,7 +37,7 @@ namespace miso
         template<class T, class FT, class SHT>
         void connect_i(T &&f, std::vector<common_slot_base *> &sholders, bool active = true) {
             static std::unordered_map<std::string, SHT> sh_hash;
-            
+
             auto sh_key = typeid(T).name() + std::string(typeid(FT).name()) + static_cast<std::ostringstream&>(
                         std::ostringstream().flush() << reinterpret_cast<void*>(&sholders)
                       ).str();
@@ -47,10 +47,10 @@ namespace miso
             func_and_bool<FT> fb{std::make_shared<FT>(std::forward<T>(f)), active, reinterpret_cast<void *>(&f)};
             bool already_in = false;
             bool active_status = active;
-            
+
             std::for_each(sh.slots.begin(), sh.slots.end(),
                           [&](func_and_bool<FT> &s) { if (s.addr == fb.addr){s.active = active; already_in = true;} active_status |= s.active; });
-            
+
             if (active_status) {
                 if (!already_in) sh.slots.emplace_back(fb);
                 if (std::find(sholders.begin(), sholders.end(), static_cast<common_slot_base *>(&sh)) == sholders.end()) {
@@ -164,6 +164,12 @@ namespace miso
     void connect(Si &&sig, So &&slo) {
         static_assert(!std::is_same<So, std::nullptr_t>::value, "cannot use nullptr as slot");
         std::forward<Si>(sig).connect(std::forward<So>(slo));
+    }
+
+    template<class Si, class So>
+    void disconnect(Si &&sig, So &&slo) {
+        static_assert(!std::is_same<So, std::nullptr_t>::value, "cannot use nullptr as slot");
+        std::forward<Si>(sig).disconnect(std::forward<So>(slo));
     }
 
     template<class T>
