@@ -57,7 +57,7 @@ namespace miso
                     sholders.push_back(&sh);
                 }
             } else {
-                remove(sholders.begin(), sholders.end(), static_cast<common_slot_base *>(&sh));
+                sholders.erase(std::remove(sholders.begin(), sholders.end(), static_cast<common_slot_base *>(&sh)), sholders.end());
                 sh_hash.erase(sh_key);
             }
         }
