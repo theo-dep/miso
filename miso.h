@@ -26,7 +26,6 @@ namespace miso
         template<typename FT>
         struct func_and_bool final {
             std::shared_ptr<FT> ft;
-            bool active;
             void *addr;
         };
 
@@ -38,58 +37,56 @@ namespace miso
         void connect_i(T &&f, std::vector<common_slot_base *> &sholders, bool active = true) {
             static std::unordered_map<std::string, SHT> sh_hash;
 
-            auto sh_key = typeid(T).name() + std::string(typeid(FT).name()) + static_cast<std::ostringstream&>(
-                        std::ostringstream().flush() << reinterpret_cast<void*>(&sholders)
-                      ).str();
+            std::string sh_key = typeid(T).name() + std::string(typeid(FT).name()) + static_cast<std::ostringstream&>(
+                                    std::ostringstream().flush() << reinterpret_cast<void*>(&sholders)
+                                 ).str();
 
-            SHT &sh = sh_hash[sh_key];
+            SHT& sh = sh_hash[sh_key];
 
-            func_and_bool<FT> fb{std::make_shared<FT>(std::forward<T>(f)), active, reinterpret_cast<void *>(&f)};
-            bool already_in = false;
-            bool active_status = active;
+            func_and_bool<FT> fb{ std::make_shared<FT>(std::forward<T>(f)), reinterpret_cast<void *>(&f) };
 
-            std::for_each(sh.slots.begin(), sh.slots.end(),
-                          [&](func_and_bool<FT> &s) { if (s.addr == fb.addr){s.active = active; already_in = true;} active_status |= s.active; });
-
-            if (active_status) {
-                if (!already_in) sh.slots.emplace_back(fb);
-                if (std::find(sholders.begin(), sholders.end(), static_cast<common_slot_base *>(&sh)) == sholders.end()) {
+            if (active) {
+                if (std::find_if(sh.slots.cbegin(), sh.slots.cend(), [&](const func_and_bool<FT> &s) { return (s.addr == fb.addr); }) == sh.slots.cend()) {
+                    sh.slots.emplace_back(fb);
+                }
+                if (std::find(sholders.cbegin(), sholders.cend(), static_cast<common_slot_base *>(&sh)) == sholders.cend()) {
                     sholders.push_back(&sh);
                 }
             } else {
-                sholders.erase(std::remove(sholders.begin(), sholders.end(), static_cast<common_slot_base *>(&sh)), sholders.end());
-                sh_hash.erase(sh_key);
+                sh.slots.erase(std::remove_if(sh.slots.begin(), sh.slots.end(), [&](const func_and_bool<FT> &s) { return (s.addr == fb.addr); }), sh.slots.end());
+                if (sh.slots.empty()) {
+                    sholders.erase(std::remove(sholders.begin(), sholders.end(), static_cast<common_slot_base *>(&sh)), sholders.end());
+                    sh_hash.erase(sh_key);
+                }
             }
         }
 
         template<class T>
         struct emitter final {
-            explicit emitter(const T &emtr) {
-                sender_objs.push(&emtr);
-                minstance = this;
+            explicit emitter(T* emtr) : sender_obj(emtr) {
+                minstances.push(this);
             }
 
             ~emitter() {
-                sender_objs.pop();
-                minstance = nullptr;
+                minstances.pop();
             }
 
             static T *sender() {
-                return const_cast<T *>(sender_objs.top());
+                if (!instance()) return nullptr;
+                return instance()->sender_obj;
             }
 
             static emitter<T> *instance() {
-                return minstance;
+                if (minstances.empty()) return nullptr;
+                return minstances.top();
             }
 
         private:
-
-            static std::stack<const T *> sender_objs;
-            static emitter<T> *minstance;
+            T* sender_obj;
+            static std::stack<emitter<T>*> minstances;
         };
 
-        template<class T> std::stack<const T *> emitter<T>::sender_objs;
-        template<class T> emitter<T> *emitter<T>::minstance = nullptr;
+        template<class T> std::stack<emitter<T>*> emitter<T>::minstances;
 
         template<class T, class... Args>
         emitter<T> &&operator <<(internal::emitter<T> &&e, signal<Args...> &s) {
@@ -112,8 +109,8 @@ namespace miso
             slot_vec_type slots;
 
             void run_slots(const Args&... args) override {
-                std::for_each(slots.begin(), slots.end(), [&](internal::func_and_bool<FT>& s)
-                              { if (s.active) (*(s.ft.get()))(args...); }
+                std::for_each(slots.rbegin(), slots.rend(), [&](internal::func_and_bool<FT>& s)
+                              { (*(s.ft.get()))(args...); }
                 );
             }
         };
@@ -122,9 +119,9 @@ namespace miso
         std::tuple<std::remove_const_t<std::remove_reference_t<Args>>...> call_args;
 
         void emit_signal(const Args&... args) {
-            for (auto& sh : slot_holders) {
-                (dynamic_cast<slot_holder_base*>(sh))->run_slots(args...);
-            }
+            std::for_each(slot_holders.begin(), slot_holders.end(), [&](internal::common_slot_base* sh)
+                          { (dynamic_cast<slot_holder_base*>(sh))->run_slots(args...); }
+                );
         }
 
         template<int ...S>
@@ -180,7 +177,7 @@ namespace miso
         throw std::runtime_error("not in an emit call");
     }
 
-    #define emit miso::internal::emitter<std::remove_pointer<decltype(this)>::type>(*this) <<
+    #define emit miso::internal::emitter<std::remove_pointer<decltype(this)>::type>(this) <<
 
 }
 
