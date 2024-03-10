@@ -33,33 +33,40 @@ namespace miso
             virtual ~common_slot_base() = default;
         };
 
-        template<class T, class FT, class SHT>
-        void connect_i(T &&f, std::vector<common_slot_base *> &sholders, bool active = true) {
-            static std::unordered_map<std::string, SHT> sh_hash;
+        struct connecter {
+            using slot_holder_hash = std::unordered_map<std::string, std::shared_ptr<common_slot_base>>;
+            slot_holder_hash sh_hash;
 
+        template<class T, class FT, class SHT>
+            void connect_i(T &&f, std::vector<common_slot_base *> &sholders, bool active) {
             std::string sh_key = typeid(T).name() + std::string(typeid(FT).name()) + static_cast<std::ostringstream&>(
-                                    std::ostringstream().flush() << reinterpret_cast<void*>(&sholders)
+                                    std::ostringstream().flush() << reinterpret_cast<uintptr_t>(&f)
                                  ).str();
 
-            SHT& sh = sh_hash[sh_key];
+                slot_holder_hash::const_iterator sh_it = sh_hash.find(sh_key);
+                if (sh_it == sh_hash.cend()) {
+                    sh_it = sh_hash.insert(sh_it, std::make_pair(sh_key, std::make_shared<SHT>()));
+                }
+
+                std::shared_ptr<SHT> sh = std::static_pointer_cast<SHT>(sh_it->second);
 
             func_and_bool<FT> fb{ std::make_shared<FT>(std::forward<T>(f)), reinterpret_cast<void *>(&f) };
 
             if (active) {
-                if (std::find_if(sh.slots.cbegin(), sh.slots.cend(), [&](const func_and_bool<FT> &s) { return (s.addr == fb.addr); }) == sh.slots.cend()) {
-                    sh.slots.emplace_back(fb);
+                    if (std::find_if(sh->slots.cbegin(), sh->slots.cend(), [&](const func_and_bool<FT> &s) { return (s.addr == fb.addr); }) == sh->slots.cend()) {
+                        sh->slots.emplace_back(fb);
                 }
-                if (std::find(sholders.cbegin(), sholders.cend(), static_cast<common_slot_base *>(&sh)) == sholders.cend()) {
-                    sholders.push_back(&sh);
+                    if (std::find(sholders.cbegin(), sholders.cend(), static_cast<common_slot_base *>(sh.get())) == sholders.cend()) {
+                        sholders.push_back(sh.get());
                 }
             } else {
-                sh.slots.erase(std::remove_if(sh.slots.begin(), sh.slots.end(), [&](const func_and_bool<FT> &s) { return (s.addr == fb.addr); }), sh.slots.end());
-                if (sh.slots.empty()) {
-                    sholders.erase(std::remove(sholders.begin(), sholders.end(), static_cast<common_slot_base *>(&sh)), sholders.end());
-                    sh_hash.erase(sh_key);
+                    sh->slots.erase(std::remove_if(sh->slots.begin(), sh->slots.end(), [&](const func_and_bool<FT> &s) { return (s.addr == fb.addr); }), sh->slots.end());
+                    if (sh->slots.empty()) {
+                        sholders.erase(std::remove(sholders.begin(), sholders.end(), static_cast<common_slot_base *>(sh.get())), sholders.end());
+                    }
                 }
             }
-        }
+        };
 
         template<class T>
         struct emitter final {
@@ -89,9 +96,9 @@ namespace miso
         template<class T> std::stack<emitter<T>*> emitter<T>::minstances;
 
         template<class T, class... Args>
-        emitter<T> &&operator <<(internal::emitter<T> &&e, signal<Args...> &s) {
+        emitter<T> &&operator <<(emitter<T> &&e, signal<Args...> &s) {
             s.delayed_dispatch();
-            return std::forward<internal::emitter<T>>(e);
+            return std::forward<emitter<T>>(e);
         }
     }
 
@@ -99,7 +106,7 @@ namespace miso
 	class signal final
 	{
         struct slot_holder_base : public internal::common_slot_base {
-            virtual void run_slots( const Args&... args) = 0;
+            virtual void run_slots(const Args&... args) = 0;
         };
 
         template<class T>
@@ -117,9 +124,10 @@ namespace miso
 
         std::vector<internal::common_slot_base*> slot_holders;
         std::tuple<std::remove_const_t<std::remove_reference_t<Args>>...> call_args;
+        internal::connecter connecter;
 
         void emit_signal(const Args&... args) {
-            std::for_each(slot_holders.begin(), slot_holders.end(), [&](internal::common_slot_base* sh)
+            std::for_each(slot_holders.rbegin(), slot_holders.rend(), [&](internal::common_slot_base* sh)
                           { (dynamic_cast<slot_holder_base*>(sh))->run_slots(args...); }
                 );
         }
@@ -141,14 +149,15 @@ namespace miso
 		~signal() noexcept = default;
 
 		template<class T>
-		void connect(T&& f, bool active = true) {
-			internal::connect_i<T, typename slot_holder<T>::FT,
-			          slot_holder<T>> (std::forward<T>(f), slot_holders, active);
+		void connect(T&& f) {
+			connecter.connect_i<T, typename slot_holder<T>::FT,
+			          slot_holder<T>> (std::forward<T>(f), slot_holders, true);
 		}
 
 		template<class T>
 		void disconnect(T&& f) {
-			connect<T>(std::forward<T>(f), false);
+			connecter.connect_i<T, typename slot_holder<T>::FT,
+			          slot_holder<T>> (std::forward<T>(f), slot_holders, false);
 		}
 
         signal<Args...>& operator()(const Args&... args) {

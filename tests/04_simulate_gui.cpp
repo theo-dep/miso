@@ -155,8 +155,8 @@ SCENARIO("Simulate connect and disconnect with click", "[simulateGui]" ) {
                 mc.run(7);
 
                 REQUIRE(lambdiIsCalled == 8);
-                REQUIRE(lambdisIsCalled.first == 8);
-                REQUIRE(lambdisIsCalled.second == "HipHip!");
+                REQUIRE(lambdisIsCalled.first == 7); // decreasing
+                REQUIRE(lambdisIsCalled.second == "Hurra"); // decreasing
                 REQUIRE(simulate_gui::functor::s_functionIntIsCalled == 8);
                 REQUIRE(dst.clickedAgain == 8);
             }
